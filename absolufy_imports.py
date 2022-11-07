@@ -27,18 +27,31 @@ class Visitor(ast.NodeVisitor):
             srcs: Iterable[str],
             *,
             never: bool,
+            allow_local: bool,
     ) -> None:
         self.parts = parts
         self.srcs = srcs
         self.to_replace: MutableMapping[int, Tuple[str, str]] = {}
         self.never = never
+        self.allow_local = allow_local
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         level = node.level
         is_absolute = level == 0
         absolute_import = '.'.join(self.parts[:-level])
+        current_path = list(self.parts[: -1])
 
-        should_be_relative = bool(self.never)
+        should_be_relative = bool(self.never) or (
+            self.allow_local and (
+                node.level == 1 or
+                (
+                    node.module is not None and
+                    node.module.split(
+                        '.',
+                    )[:len(current_path)] == current_path
+                )
+            )
+        )
         if is_absolute ^ should_be_relative:
             self.generic_visit(node)
             return
@@ -97,6 +110,7 @@ def absolute_imports(
         srcs: Iterable[str],
         *,
         never: bool = False,
+        allow_local: bool = False,
 ) -> int:
     relative_paths = []
     possible_srcs = []
@@ -134,6 +148,7 @@ def absolute_imports(
         relative_path.parts,
         srcs,
         never=never,
+        allow_local=allow_local,
     )
     visitor.visit(tree)
 
@@ -158,6 +173,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument('--application-directories', default='.:src')
     parser.add_argument('files', nargs='*')
     parser.add_argument('--never', action='store_true')
+    parser.add_argument('--allow_local', action='store_true')
     args = parser.parse_args(argv)
 
     srcs = [
@@ -170,6 +186,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             file,
             srcs,
             never=args.never,
+            allow_local=args.allow_local,
         )
     return ret
 
